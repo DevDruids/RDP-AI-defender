@@ -9,6 +9,7 @@ import win32evtlogutil
 import win32con
 import requests
 import configparser
+import json
 
 flags = win32evtlog.EVENTLOG_SEQUENTIAL_READ | win32evtlog.EVENTLOG_BACKWARDS_READ
 
@@ -177,104 +178,108 @@ def main():
     last_seen_time = datetime.now()
     EVENT_BUFFER = []
 
-    while True:
-        new_events = []
+    try:
+        while True:
+            new_events = []
 
-        for name in [
-            "Security",
-            "Microsoft-Windows-Sysmon/Operational",
-            "Microsoft-Windows-TerminalServices-RemoteConnectionManager/Operational"
-        ]:
-            try:
-                h = win32evtlog.OpenEventLog(None, name)
-                new_events += readEventLog(
-                    h,
-                    "security" if name == "Security" else
-                    "sysmon" if "Sysmon" in name else
-                    "rdp"
-                )
-                win32evtlog.CloseEventLog(h)
-            except:
-                pass
+            for name in [
+                "Security",
+                "Microsoft-Windows-Sysmon/Operational",
+                "Microsoft-Windows-TerminalServices-RemoteConnectionManager/Operational"
+            ]:
+                try:
+                    h = win32evtlog.OpenEventLog(None, name)
+                    new_events += readEventLog(
+                        h,
+                        "security" if name == "Security" else
+                        "sysmon" if "Sysmon" in name else
+                        "rdp"
+                    )
+                    win32evtlog.CloseEventLog(h)
+                except:
+                    pass
 
-        new_events = [e for e in new_events if e["time"] > last_seen_time]
+            new_events = [e for e in new_events if e["time"] > last_seen_time]
 
-        if not new_events:
-            time.sleep(1)
-            continue
-
-        EVENT_BUFFER.extend(new_events)
-        last_seen_time = max(e["time"] for e in new_events)
-
-        for e in new_events:
-            if e["event_id"] == 4625 and e["logon_type"] in (3, 10):
-                print(
-                    f"[FAILED LOGIN] IP={e['source_ip']} "
-                    f"TYPE={e['logon_type']} "
-                    f"TIME={e['time'].strftime('%H:%M:%S')}"
-                )
-                attack_alert(f"[FAILED LOGIN] IP={e['source_ip']}; TYPE={e['logon_type']}; TIME={e['time'].strftime('%H:%M:%S')}")
-
-        cutoff = datetime.now() - timedelta(minutes=5)
-        EVENT_BUFFER = [e for e in EVENT_BUFFER if e["time"] >= cutoff]
-
-        EVENT_BUFFER = add_failed_attempts_by_ip(EVENT_BUFFER)
-        df = pd.DataFrame(EVENT_BUFFER)
-
-        df["rdp_bruteforce_rule"] = (
-                (df["event_id"] == 4625) &
-                (df["logon_type"].isin([3, 10])) &
-                (df["failed_attempts_5min_by_ip"] >= 5)
-        )
-
-        X = scaler.transform(df[FEATURES].fillna(0))
-        df["anomaly"] = model.predict(X)
-
-        alerts = df[df["rdp_bruteforce_rule"]].drop_duplicates("source_ip")
-
-        now = datetime.now()
-        for _, row in alerts.iterrows():
-            ip = row["source_ip"]
-
-            attempts = int(row["failed_attempts_5min_by_ip"])
-
-            if attempts >= 8:
-                severity = "CRITICAL"
-            elif attempts >= 5:
-                severity = "HIGH"
-            elif attempts >= 3:
-                severity = "MEDIUM"
-            else:
-                severity = "LOW"
-
-            if ip in last_alert_time and now - last_alert_time[ip] < ALERT_COOLDOWN:
+            if not new_events:
+                time.sleep(1)
                 continue
 
-            last_alert_time[ip] = now
+            EVENT_BUFFER.extend(new_events)
+            last_seen_time = max(e["time"] for e in new_events)
 
-            print(f"⚠️ RDP BRUTE FORCE | SEVERITY={severity} | IP={ip} | ATTEMPTS={attempts}")
-            if severity in ("HIGH", "CRITICAL"):
-                attack_alert(
-                    f"⚠️ RDP BRUTE FORCE\n"
-                    f"IP: {ip}\n"
-                    f"Attempts: {attempts}\n"
-                    f"Severity: {severity}"
-                )
+            for e in new_events:
+                if e["event_id"] == 4625 and e["logon_type"] in (3, 10):
+                    print(
+                        f"[FAILED LOGIN] IP={e['source_ip']} "
+                        f"TYPE={e['logon_type']} "
+                        f"TIME={e['time'].strftime('%H:%M:%S')}"
+                    )
+                    attack_alert(
+                        f"[FAILED LOGIN] IP={e['source_ip']}; TYPE={e['logon_type']}; TIME={e['time'].strftime('%H:%M:%S')}")
 
-            Notification(
-                app_id="RDP AI Defender",
-                title="⚠️ RDP ATTACK DETECTED",
-                msg=f"IP: {ip}\nAttempts: {attempts}\nSeverity: {severity}",
-                duration="long"
-            ).show()
+            cutoff = datetime.now() - timedelta(minutes=5)
+            EVENT_BUFFER = [e for e in EVENT_BUFFER if e["time"] >= cutoff]
 
-            win32evtlogutil.ReportEvent(
-                EVENT_SOURCE,
-                1001,
-                eventType=win32con.EVENTLOG_WARNING_TYPE,
-                strings=[f"RDP brute-force detected from IP {ip}. Attempts: {row['failed_attempts_5min_by_ip']}"]
+            EVENT_BUFFER = add_failed_attempts_by_ip(EVENT_BUFFER)
+            df = pd.DataFrame(EVENT_BUFFER)
+
+            df["rdp_bruteforce_rule"] = (
+                    (df["event_id"] == 4625) &
+                    (df["logon_type"].isin([3, 10])) &
+                    (df["failed_attempts_5min_by_ip"] >= 5)
             )
-        time.sleep(1)
+
+            X = scaler.transform(df[FEATURES].fillna(0))
+            df["anomaly"] = model.predict(X)
+
+            alerts = df[df["rdp_bruteforce_rule"]].drop_duplicates("source_ip")
+
+            now = datetime.now()
+            for _, row in alerts.iterrows():
+                ip = row["source_ip"]
+
+                attempts = int(row["failed_attempts_5min_by_ip"])
+
+                if attempts >= 8:
+                    severity = "CRITICAL"
+                elif attempts >= 5:
+                    severity = "HIGH"
+                elif attempts >= 3:
+                    severity = "MEDIUM"
+                else:
+                    severity = "LOW"
+
+                if ip in last_alert_time and now - last_alert_time[ip] < ALERT_COOLDOWN:
+                    continue
+
+                last_alert_time[ip] = now
+
+                print(f"⚠️ RDP BRUTE FORCE | SEVERITY={severity} | IP={ip} | ATTEMPTS={attempts}")
+                if severity in ("HIGH", "CRITICAL"):
+                    attack_alert(
+                        f"⚠️ RDP BRUTE FORCE\n"
+                        f"IP: {ip}\n"
+                        f"Attempts: {attempts}\n"
+                        f"Severity: {severity}"
+                    )
+
+                Notification(
+                    app_id="RDP AI Defender",
+                    title="⚠️ RDP ATTACK DETECTED",
+                    msg=f"IP: {ip}\nAttempts: {attempts}\nSeverity: {severity}",
+                    duration="long"
+                ).show()
+
+                win32evtlogutil.ReportEvent(
+                    EVENT_SOURCE,
+                    1001,
+                    eventType=win32con.EVENTLOG_WARNING_TYPE,
+                    strings=[f"RDP brute-force detected from IP {ip}. Attempts: {row['failed_attempts_5min_by_ip']}"]
+                )
+            time.sleep(1)
+    except KeyboardInterrupt:
+        print("\n RDP-checker завершив свою роботу")
 
 if __name__ == "__main__":
     main()
