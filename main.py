@@ -52,7 +52,7 @@ EVENT_SOURCE = "RDP AI Defender"
 config = configparser.ConfigParser()
 config.read("config.ini")
 
-TELEGRAM_TOKEN = config['TELEGRAM']['TOKEN']
+TELEGRAM_TOKEN = config["TELEGRAM"]['TOKEN']
 
 CHAT_ID = input("Введіть Telegram chat_id для отримання сповіщень(його ви можете отримати в телеграм боті @RDP_attackAlert_bot після вводу команди /chat_id): ").strip()
 
