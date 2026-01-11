@@ -1,0 +1,5 @@
+event_id,logon_type,log_source,hour,weekday,is_failed_login,is_successful_login,source_ip,is_rdp,time,failed_attempts_5min_by_ip,is_rdp_bruteforce
+4624,-1,security,18,4,0,1,-,0,2026-01-02 18:50:28,0,0
+4624,-1,security,18,4,0,1,-,0,2026-01-02 18:43:05,0,0
+4624,-1,security,18,4,0,1,-,0,2026-01-02 18:42:05,0,0
+4624,-1,security,18,4,0,1,-,0,2026-01-02 18:42:05,0,0
