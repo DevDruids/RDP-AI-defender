@@ -173,11 +173,11 @@ def main():
 
                 prev = prev_event.get(ip)
 
-                changes_in_smth = {
+                changes_in_smth = (
                     prev is None or
-                    prev["attempts"] != attempts or
-                    prev["severity"] != severity
-                }
+                    prev["severity"] != severity or
+                    attempts - prev["attempts"] >= 3
+                )
 
                 if not changes_in_smth:
                     if ip in last_alert_time and now - last_alert_time[ip] < ALERT_COOLDOWN:
